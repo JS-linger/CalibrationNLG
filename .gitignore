@@ -1,0 +1,41 @@
+# Ignore directory
+outputs/
+output/
+data/
+
+# Ignore Visual Studio files
+.vs/
+.vscode/
+
+# Ignore Mac system files
+.DS_Store
+
+# Ignore Windows system files
+Thumbs.db
+desktop.ini
+
+# Ignore log files
+*.log
+
+# Ignore Python bytecode
+__pycache__/
+*.py[cod]
+
+# Ignore virtual environment directories
+venv/
+env/
+.venv/
+.env/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore temporary files
+*.tmp
+*.bak
+
+# Ignore compiled code
+*.o
+*.so
+*.dll
+*.exe
