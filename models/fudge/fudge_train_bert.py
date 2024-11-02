@@ -1,23 +1,45 @@
 import torch
-from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments, DataCollatorWithPadding
+from transformers import (
+    BertTokenizer, 
+    BertForSequenceClassification, 
+    Trainer, 
+    TrainingArguments, 
+    DataCollatorWithPadding,
+    PreTrainedTokenizer
+)
+from datasets import Dataset, DatasetDict
 
-def train_fudge_model(dataset, model_output_dir, label_column, num_labels=None, epochs=3, test_size=0.2, seed=42):
+def train_fudge_model(
+    dataset: DatasetDict, 
+    model_output_dir: str, 
+    label_column: str, 
+    num_labels: int | None = None, 
+    epochs: int = 3, 
+    test_size: float = 0.2, 
+    seed: int = 42
+) -> tuple[BertForSequenceClassification, PreTrainedTokenizer]:
     """
     Train the FUDGE model using a BERT base uncased classifier on the prefix enumerated data.
 
     Args:
-        dataset (Dataset): Hugging Face Dataset containing the preprocessed data.
-        model_output_dir (str): Directory to save the fine-tuned model.
-        label_column (str): The name of the label column to use for training.
-        num_labels (int): Number of output labels for the classifier.
-        epochs (int): Number of training epochs.
-        test_size (float): Fraction of the dataset to use as validation data.
-        seed (int): Random seed for reproducibility.
+        dataset: Hugging Face Dataset containing the preprocessed data
+        model_output_dir: Directory to save the fine-tuned model
+        label_column: The name of the label column to use for training
+        num_labels: Number of output labels for the classifier
+        epochs: Number of training epochs
+        test_size: Fraction of the dataset to use as validation data
+        seed: Random seed for reproducibility
+    
+    Returns:
+        Tuple of (trained model, tokenizer)
     """
 
     # Load the tokenizer and model
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=num_labels)
+    model = BertForSequenceClassification.from_pretrained(
+        'bert-base-uncased', 
+        num_labels=num_labels
+    )
     model.to('cuda')  # Use GPU for training
     print(f"Model device: {next(model.parameters()).device}")
 
@@ -34,7 +56,7 @@ def train_fudge_model(dataset, model_output_dir, label_column, num_labels=None, 
             print(f"Tunable layer: {name}")
 
     # Tokenize the dataset
-    def tokenize_function(examples):
+    def tokenize_function(examples: dict[str, str]) -> dict[str, torch.Tensor]:
         tokenized_inputs = tokenizer(examples['prefixes'], truncation=True)
         tokenized_inputs['labels'] = examples['labels']
         return tokenized_inputs
@@ -44,7 +66,6 @@ def train_fudge_model(dataset, model_output_dir, label_column, num_labels=None, 
         tokenize_function,
         batched=True,
         num_proc=4
-        #remove_columns=dataset["train"].column_names
     )
 
     # Set the format to PyTorch tensors
@@ -67,7 +88,6 @@ def train_fudge_model(dataset, model_output_dir, label_column, num_labels=None, 
         logging_steps=0.01,
         fp16=True,
         group_by_length=True
-
     )
 
     # Initialize Trainer
@@ -86,3 +106,5 @@ def train_fudge_model(dataset, model_output_dir, label_column, num_labels=None, 
     # Save the fine-tuned model
     model.save_pretrained(model_output_dir)
     tokenizer.save_pretrained(model_output_dir)
+    
+    return model, tokenizer

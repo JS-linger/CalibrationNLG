@@ -1,11 +1,11 @@
 import os
-import pandas as pd
 import random
 import numpy as np
-from sklearn.model_selection import train_test_split
+import pandas as pd
 from datasets import Dataset, DatasetDict
+from sklearn.model_selection import train_test_split
 
-def enumerate_prefixes(text, prefix_length=None):
+def enumerate_prefixes(text: str, prefix_length: int | None = None) -> list[str]:
     """
     Enumerates all prefixes for a given text at the token (word) level.
     Optionally, limit to a specific prefix length (in tokens).
@@ -18,10 +18,15 @@ def enumerate_prefixes(text, prefix_length=None):
     prefixes = [" ".join(tokens[:i]) for i in range(1, min(len(tokens) + 1, prefix_length + 1))]
     return prefixes
 
-def weighted_exponential_sampler(prefixes, sample_size=3, seed=42, decay_rate=0.6):
+def weighted_exponential_sampler(
+    prefixes: list[str], 
+    sample_size: int = 3, 
+    seed: int | None = 42, 
+    decay_rate: float = 0.6
+) -> list[str]:
     """
-    Samples `sample_size - 2` unique prefix positions from the input list of prefixes using an exponential weighting scheme.
-    Always includes the first and last prefixes (anchors).
+    Samples `sample_size - 2` unique prefix positions from the input list of prefixes 
+    using an exponential weighting scheme. Always includes the first and last prefixes.
     """
     seq_length = len(prefixes)
     
@@ -41,43 +46,98 @@ def weighted_exponential_sampler(prefixes, sample_size=3, seed=42, decay_rate=0.
 
     return [prefixes[i] for i in all_positions]
 
-def process_dataset(df, max_prefix_length=None, sample_size=10, seed=42, decay_rate=0.6, subsample=True):
+def process_dataset(
+    df: pd.DataFrame, 
+    max_prefix_length: int | None = None, 
+    sample_size: int = 10, 
+    seed: int = 42, 
+    decay_rate: float = 0.6, 
+    subsample: bool = True
+) -> pd.DataFrame:
     """
-    Processes a dataset to generate prefix enumerations and, optionally, apply random sampling for training set.
+    Processes a dataset to generate prefix enumerations and apply random sampling for training set.
     """
     df['prefixes'] = df.iloc[:, 0].apply(lambda text: enumerate_prefixes(text.strip(), max_prefix_length))
 
     if subsample:
-        df['prefixes'] = df['prefixes'].apply(lambda prefixes: weighted_exponential_sampler(prefixes, sample_size, seed, decay_rate))
+        df['prefixes'] = df['prefixes'].apply(
+            lambda prefixes: weighted_exponential_sampler(prefixes, sample_size, seed, decay_rate)
+        )
 
     df_exploded = df[['index', 'prefixes', 'labels']].explode('prefixes')
 
     return df_exploded
 
-def map_labels_to_integers(df, label_column):
+def map_labels_to_integers(
+    df: pd.DataFrame, 
+    label_column: str
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """
+    Maps string labels to integers.
+    """
     unique_labels = df[label_column].unique()
     label_map = {label: idx for idx, label in enumerate(unique_labels)}
     df['labels'] = df[label_column].map(label_map).astype(int)
     return df, label_map
 
-def load_preprocessed_data(df, label_column= 'genre', test_size=0.2, seed=42, max_prefix_length=None, sample_size=10, decay_rate=0.6):
+def load_preprocessed_data(
+    df: pd.DataFrame, 
+    label_column: str = 'genre', 
+    test_size: float = 0.2, 
+    seed: int = 42, 
+    max_prefix_length: int | None = None, 
+    sample_size: int = 10, 
+    decay_rate: float = 0.6,
+    process_prefixes: bool = True
+) -> tuple[DatasetDict, dict[str, int]]:
     """
-    Load the preprocessed data and split it into train and validation sets.
+    Load and preprocess data, splitting into train and validation sets.
+    
+    Args:
+        df: Input DataFrame
+        label_column: Name of the label column
+        test_size: Fraction of data to use for validation
+        seed: Random seed
+        max_prefix_length: Maximum prefix length for enumeration
+        sample_size: Number of prefixes to sample
+        decay_rate: Decay rate for exponential sampling
+        process_prefixes: Whether to process text into prefixes
+    
+    Returns:
+        Tuple of (DatasetDict containing train and validation sets, label mapping dictionary)
     """
     df['index'] = df.index
 
     # Map labels to integers
     df, label_map = map_labels_to_integers(df, label_column)
 
+    # Split into train and validation
     df_train, df_validation = train_test_split(df, test_size=test_size, random_state=seed)
 
-    # Process training set with subsampling
-    df_train_processed = process_dataset(df_train, max_prefix_length=max_prefix_length,
-                                         sample_size=sample_size, seed=seed, decay_rate=decay_rate, subsample=True)
-    
-    # Process validation set without subsampling
-    df_validation_processed = process_dataset(df_validation, max_prefix_length=max_prefix_length,
-                                              sample_size=sample_size, seed=seed, decay_rate=decay_rate, subsample=False)
+    if process_prefixes:
+        # Process training set with subsampling
+        df_train_processed = process_dataset(
+            df_train, 
+            max_prefix_length=max_prefix_length,
+            sample_size=sample_size, 
+            seed=seed, 
+            decay_rate=decay_rate, 
+            subsample=True
+        )
+        
+        # Process validation set without subsampling
+        df_validation_processed = process_dataset(
+            df_validation, 
+            max_prefix_length=max_prefix_length,
+            sample_size=sample_size, 
+            seed=seed, 
+            decay_rate=decay_rate, 
+            subsample=False
+        )
+    else:
+        # Use original data without prefix processing
+        df_train_processed = df_train
+        df_validation_processed = df_validation
 
     dataset_train = Dataset.from_pandas(df_train_processed)
     dataset_validation = Dataset.from_pandas(df_validation_processed)
