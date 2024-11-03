@@ -15,7 +15,7 @@
         "vscode": {
             "extensions": [
                 "ms-python.python",
-                "ms-vscode-remote.remote-containers",
+                "ms-vscode-remote.remote-wsl",
                 "GitHub.copilot",
                 "DavidAnson.vscode-markdownlint",
                 "eamodio.gitlens",
