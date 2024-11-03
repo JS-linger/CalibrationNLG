@@ -1,0 +1,19 @@
+name: controlNLG_env
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch
+  - pytorch-cuda=12.1
+  - transformers
+  - datasets
+  - pandas
+  - numpy
+  - scikit-learn
+  - pip
+  - pip:
+    - bitsandbytes
+    - accelerate
