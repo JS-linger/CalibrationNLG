@@ -38,5 +38,5 @@
             }
         }
     },
-    "postCreateCommand": "conda activate controlNLG_env"
+    "postCreateCommand": "source ~/.bashrc"
 }
