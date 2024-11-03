@@ -38,5 +38,5 @@
             }
         }
     },
-    "postCreateCommand": "source ~/.bashrc"
+    "postCreateCommand": ["/bin/bash", "-c", "source ~/.bashrc"]
 }
