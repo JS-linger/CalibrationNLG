@@ -8,13 +8,14 @@
     "workspaceFolder": "/app",
     "runArgs": [
         "--gpus=all",
-        "-e", "PYTHONPATH=/app"
+        "-e",
+        "PYTHONPATH=/app"
     ],
     "customizations": {
         "vscode": {
             "extensions": [
                 "ms-python.python",
-                "ms-vscode-remote.remote-wsl",
+                "ms-vscode-remote.remote-containers",
                 "GitHub.copilot",
                 "DavidAnson.vscode-markdownlint",
                 "eamodio.gitlens",
@@ -38,5 +39,9 @@
             }
         }
     },
-    "postCreateCommand": ["/bin/bash", "-c", "source ~/.bashrc"]
+    "postCreateCommand": [
+        "/bin/bash",
+        "-c",
+        "source ~/.bashrc"
+    ]
 }
