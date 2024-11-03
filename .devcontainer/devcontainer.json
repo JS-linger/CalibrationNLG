@@ -1,6 +1,7 @@
 {
     "name": "Dev Container - ControlNLG",
     "build": {
+        "context": "..",
         "dockerfile": "Dockerfile"
     },
     "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
