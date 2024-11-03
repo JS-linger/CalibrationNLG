@@ -1,6 +1,7 @@
 import pandas as pd
 from preprocessing.pre_process_text import load_preprocessed_data, map_labels_to_integers
 from models.fudge.fudge_train_bert import train_fudge_model
+from models.fudge.fudge_train_autoregressive import train_fudge_model_autoregressive
 
 import importlib
 import preprocessing.pre_process_text
