@@ -22,8 +22,8 @@ WORKDIR /app
 # Clone the repository
 RUN git clone https://github.com/JS-linger/CalibrationNLG.git .
 
-# Copy environment file (this will overwrite the one from the repo if it exists)
-COPY ../controlNLG_env.yml .
+# Copy environment file
+COPY controlNLG_env.yml .
 
 # Create conda environment
 RUN conda env create -f controlNLG_env.yml
@@ -31,6 +31,6 @@ RUN conda env create -f controlNLG_env.yml
 # Activate environment
 SHELL ["/bin/bash", "-c"]
 RUN echo "conda activate controlNLG_env" >> ~/.bashrc
-ENV PATH /opt/conda/envs/controlNLG_env/bin:$PATH
+ENV PATH=/opt/conda/envs/controlNLG_env/bin:$PATH
 
 CMD ["python", "main.py"]
