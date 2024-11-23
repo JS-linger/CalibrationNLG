@@ -57,14 +57,15 @@ def process_dataset(
     """
     Processes a dataset to generate prefix enumerations and apply random sampling for training set.
     """
-    df['prefixes'] = df.iloc[:, 0].apply(lambda text: enumerate_prefixes(text.strip(), max_prefix_length))
+
+    df['text'] = df.iloc[:, 0].apply(lambda text: enumerate_prefixes(text.strip(), max_prefix_length))
 
     if subsample:
-        df['prefixes'] = df['prefixes'].apply(
+        df['text'] = df['text'].apply(
             lambda prefixes: weighted_exponential_sampler(prefixes, sample_size, seed, decay_rate)
         )
 
-    df_exploded = df[['index', 'prefixes', 'labels']].explode('prefixes')
+    df_exploded = df[['index', 'text', 'labels']].explode('text')
 
     return df_exploded
 
@@ -107,6 +108,8 @@ def load_preprocessed_data(
         Tuple of (DatasetDict containing train and validation sets, label mapping dictionary)
     """
     df['index'] = df.index
+
+    df = df.rename(columns={df.columns[0]: 'text'})
 
     # Map labels to integers
     df, label_map = map_labels_to_integers(df, label_column)

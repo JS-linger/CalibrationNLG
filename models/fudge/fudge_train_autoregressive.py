@@ -34,6 +34,13 @@ class AutoregressiveFudgeClassifier(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_size, num_labels)
         )
+    
+    # Add gradient checkpointing
+    def gradient_checkpointing_enable(self, **kwargs):
+        self.base_model.gradient_checkpointing_enable(**kwargs)
+        
+    def gradient_checkpointing_disable(self):
+        self.base_model.gradient_checkpointing_disable()
 
     def forward(
         self, 
