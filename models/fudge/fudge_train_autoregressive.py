@@ -8,6 +8,10 @@ from transformers import (
     DataCollatorWithPadding,
     PreTrainedTokenizer
 )
+
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+import numpy as np
+
 from datasets import Dataset, DatasetDict
 
 class AutoregressiveFudgeClassifier(nn.Module):
@@ -15,14 +19,25 @@ class AutoregressiveFudgeClassifier(nn.Module):
         self, 
         model_name: str = 'Qwen/Qwen1.5-0.5B',
         num_labels: int = 2,
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        num_layers_to_train: int = 2
     ) -> None:
         super().__init__()
         # Load the base autoregressive model
         self.base_model = AutoModelForCausalLM.from_pretrained(
             model_name,
+            attn_implementation="sdpa",
             trust_remote_code=True
         ).base_model  # Get the base model without LM head
+
+        # Freeze all parameters first
+        for param in self.base_model.parameters():
+            param.requires_grad = False
+            
+        # Unfreeze last n transformer layers
+        for layer in self.base_model.layers[-num_layers_to_train:]:
+            for param in layer.parameters():
+                param.requires_grad = True
         
         hidden_size = self.base_model.config.hidden_size
         
@@ -34,13 +49,6 @@ class AutoregressiveFudgeClassifier(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_size, num_labels)
         )
-    
-    # Add gradient checkpointing
-    def gradient_checkpointing_enable(self, **kwargs):
-        self.base_model.gradient_checkpointing_enable(**kwargs)
-        
-    def gradient_checkpointing_disable(self):
-        self.base_model.gradient_checkpointing_disable()
 
     def forward(
         self, 
@@ -65,47 +73,43 @@ class AutoregressiveFudgeClassifier(nn.Module):
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1))
+            if labels.dim() > 1:
+                labels = labels.squeeze(-1)
+            loss = loss_fct(logits, labels)
             
-        return {"loss": loss, "logits": logits} if loss is not None else {"logits": logits}
+        return {
+            "loss": loss, 
+            "logits": logits,
+           # "hidden_states": outputs.hidden_states if hasattr(outputs, "hidden_states") else None
+        }
 
 def train_fudge_model(
     dataset: DatasetDict, 
     model_output_dir: str,
     label_column: str,
     num_labels: int | None = None,
-    epochs: int = 3,
-    test_size: float = 0.2,
+    epochs: int = 10,
     seed: int = 42,
     model_name: str = 'Qwen/Qwen1.5-0.5B'
 ) -> tuple[AutoregressiveFudgeClassifier, PreTrainedTokenizer]:
     """
     Train the FUDGE model using an autoregressive model as the base.
-    
-    Args:
-        dataset: HuggingFace dataset dictionary containing train and validation splits
-        model_output_dir: Directory to save the model
-        label_column: Name of the label column
-        num_labels: Number of classification labels
-        epochs: Number of training epochs
-        test_size: Fraction of data for validation
-        seed: Random seed
-        model_name: Name of the base model
-    
-    Returns:
-        Tuple of (trained model, tokenizer)
     """
-    # Load the tokenizer
+    # Set random seeds
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
         model_name,
         trust_remote_code=True
     )
     
-    # Ensure padding token is set
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    # Initialize the model
+    # Initialize model
     model = AutoregressiveFudgeClassifier(
         model_name=model_name,
         num_labels=num_labels
@@ -114,22 +118,35 @@ def train_fudge_model(
     
     print(f"Model device: {next(model.parameters()).device}")
 
-    # Tokenize the dataset
+    # Tokenize dataset with proper label handling
     def tokenize_function(examples: dict[str, str]) -> dict[str, torch.Tensor]:
-        return tokenizer(
+        # Tokenize the text inputs
+        tokenized_inputs = tokenizer(
             examples['text'],
             truncation=True,
             padding=True,
             max_length=512,
             return_tensors='pt'
         )
+        
+        # Convert labels to tensor and ensure proper shape
+        labels = torch.tensor(examples[label_column])
+        if labels.dim() > 1:
+            labels = labels.squeeze(-1)
+            
+        # Add labels to tokenized inputs
+        tokenized_inputs['labels'] = labels
+        
+        return tokenized_inputs
 
     print("Tokenizing dataset...")
+    # Process and verify dataset structure
     tokenized_data = dataset.map(
         tokenize_function,
         batched=True,
         num_proc=4,
-        remove_columns=['text']
+        remove_columns=dataset['train'].column_names,  # Remove all original columns
+        desc="Tokenizing datasets"
     )
 
     tokenized_data.set_format(
@@ -137,25 +154,50 @@ def train_fudge_model(
         columns=['input_ids', 'attention_mask', 'labels']
     )
 
+    def compute_metrics(eval_pred):
+        """Compute classification metrics"""
+        logits, labels = eval_pred
+        predictions = np.argmax(logits, axis=-1)
+
+        # Calculate metrics
+        accuracy = accuracy_score(labels, predictions)
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            labels, 
+            predictions, 
+            average='weighted'
+        )
+
+        return {
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'f1': f1
+        }
+
+
     # Training arguments
     training_args = TrainingArguments(
         output_dir=model_output_dir,
-        evaluation_strategy="epoch",
+        evaluation_strategy="steps",     # Evaluate du ring training
+        eval_steps=0.1,                  # Evaluate every 100 steps
+        save_strategy="steps",           # Save based on evaluation
+        save_steps=0.1,                  # Save every 100 steps
         learning_rate=1e-5,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
-        gradient_accumulation_steps=4,
+        per_device_train_batch_size=16,
+        per_device_eval_batch_size=16,
+        gradient_accumulation_steps=2,
         num_train_epochs=epochs,
         weight_decay=0.01,
         logging_dir='./logs',
-        logging_steps=100,
+        logging_steps=0.1,
         fp16=True,
         group_by_length=True,
-        save_strategy="epoch",
         load_best_model_at_end=True,
-        metric_for_best_model="loss",
-        warmup_steps=500,
-        gradient_checkpointing=True
+        save_total_limit=1,              # Keep only the best model
+        metric_for_best_model="eval_loss",  # Use validation loss for best model
+        greater_is_better=False,         # Lower loss is better
+        warmup_ratio=0.1,
+        remove_unused_columns=True
     )
 
     # Initialize trainer
@@ -165,15 +207,33 @@ def train_fudge_model(
         train_dataset=tokenized_data['train'],
         eval_dataset=tokenized_data['validation'],
         tokenizer=tokenizer,
-        data_collator=DataCollatorWithPadding(tokenizer=tokenizer)
+        data_collator=DataCollatorWithPadding(tokenizer=tokenizer),
+        compute_metrics=compute_metrics
     )
 
-    # Train the model
+    # Train and save
     print("Starting training...")
     trainer.train()
 
-    # Save the model
-    trainer.save_model(model_output_dir)
+    # Save model and tokenizer
+    import os
+    os.makedirs(model_output_dir, exist_ok=True)
+    
+    final_model_path = os.path.join(model_output_dir, "fudge_classifier.pt")
+    print(f"Saving model to {final_model_path}")
+    torch.save({
+        'state_dict': model.state_dict(),
+        'base_model_name': model_name,
+        'num_labels': num_labels
+    }, final_model_path)
+    
     tokenizer.save_pretrained(model_output_dir)
+    
+    # Clean up checkpoints
+    import shutil
+    import glob
+    checkpoint_dirs = glob.glob(f"{model_output_dir}/checkpoint-*")
+    for dir in checkpoint_dirs:
+        shutil.rmtree(dir)
     
     return model, tokenizer

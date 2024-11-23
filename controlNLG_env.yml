@@ -13,6 +13,7 @@ dependencies:
   - pandas
   - numpy
   - scikit-learn
+  - flash-attn
   - pip
   - pip:
     - bitsandbytes
