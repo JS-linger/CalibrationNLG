@@ -87,6 +87,7 @@ def train_fudge_model(
     dataset: DatasetDict, 
     model_output_dir: str,
     label_column: str,
+    label_mapping: dict[str, int],
     num_labels: int | None = None,
     epochs: int = 10,
     seed: int = 42,
@@ -94,6 +95,16 @@ def train_fudge_model(
 ) -> tuple[AutoregressiveFudgeClassifier, PreTrainedTokenizer]:
     """
     Train the FUDGE model using an autoregressive model as the base.
+    
+    Args:
+        dataset: Dataset containing training and validation data
+        model_output_dir: Directory to save the model
+        label_column: Name of the column containing labels
+        label_mapping: Dictionary mapping class names to indices
+        num_labels: Number of classes (if None, will be inferred from label_mapping)
+        epochs: Number of training epochs
+        seed: Random seed
+        model_name: Name of the base model to use
     """
     # Set random seeds
     torch.manual_seed(seed)
@@ -224,7 +235,8 @@ def train_fudge_model(
     torch.save({
         'state_dict': model.state_dict(),
         'base_model_name': model_name,
-        'num_labels': num_labels
+        'num_labels': num_labels,
+        'label_mapping': label_mapping
     }, final_model_path)
     
     tokenizer.save_pretrained(model_output_dir)

@@ -1,12 +1,12 @@
 import pandas as pd
 from preprocessing.pre_process_text import load_preprocessed_data, map_labels_to_integers
-from models.fudge.fudge_train_autoregressive import train_fudge_model
+from models.fudge.train_fudge_autoregressive import train_fudge_model
 
 import importlib
 import preprocessing.pre_process_text
 importlib.reload(preprocessing.pre_process_text)
 
-import models.fudge.fudge_train_bert
+import models.fudge.train_fudge_bert
 importlib.reload(models.fudge.fudge_train_autoregressive)
 
 if __name__ == "__main__":
@@ -36,10 +36,10 @@ if __name__ == "__main__":
     train_fudge_model(
         dataset=data,
         model_output_dir='outputs/fudge_model',
-        label_column='labels',  # Use 'labels' since it's already converted
+        label_column='labels',
+        label_mapping=label_map,
         num_labels=num_labels,
         epochs=3,
-        test_size=0.2,
         seed=42,
         model_name='Qwen/Qwen1.5-0.5B'
     )

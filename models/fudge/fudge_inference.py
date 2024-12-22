@@ -8,6 +8,7 @@ class FudgeInference:
         model: AutoModelForCausalLM,
         tokenizer: AutoTokenizer,
         fudge_model_path: str,
+        target_class: int | str,  # Can now accept either class index or name
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
         """
@@ -17,25 +18,52 @@ class FudgeInference:
             model: HuggingFace language model
             tokenizer: HuggingFace tokenizer
             fudge_model_path: Path to trained FUDGE model
+            target_class: Target class for inference
             device: Device to run inference on
         """
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
 
-        # Load saved FUDGE model state
-        checkpoint = torch.load(fudge_model_path, map_location=device)
+        # Load checkpoint with all metadata
+        checkpoint = torch.load(
+            fudge_model_path, 
+            map_location=device
+        )
         
-        # Initialize FUDGE model with saved config
-        from models.fudge.fudge_train_autoregressive import AutoregressiveFudgeClassifier
+        # Load label mapping from checkpoint
+        self.label_mapping = checkpoint['label_mapping']
+        self.reverse_mapping = {v: k for k, v in self.label_mapping.items()}
+        self.num_classes = checkpoint['num_labels']
+        
+        # Handle target class specification (can be name or index)
+        if isinstance(target_class, str):
+            if target_class not in self.label_mapping:
+                raise ValueError(f"Unknown class name: {target_class}. Available classes: {list(self.label_mapping.keys())}")
+            self.target_class = self.label_mapping[target_class]
+        else:
+            if not 0 <= target_class < self.num_classes:
+                raise ValueError(f"target_class must be between 0 and {self.num_classes-1}")
+            self.target_class = target_class
+        
+        # Initialize FUDGE model
         self.fudge_model = AutoregressiveFudgeClassifier(
             model_name=checkpoint['base_model_name'],
-            num_labels=checkpoint['num_labels']
+            num_labels=self.num_classes
         ).to(device)
         
         # Load the saved weights
         self.fudge_model.load_state_dict(checkpoint['state_dict'])
-        self.fudge_model.eval()  # Set to evaluation mode
+        self.fudge_model.eval()
+
+    @property
+    def target_class_name(self) -> str:
+        """Get the name of the target class"""
+        return self.reverse_mapping.get(self.target_class, str(self.target_class))
+
+    def get_available_classes(self) -> dict[str, int]:
+        """Return dictionary of available class names and their indices"""
+        return self.label_mapping
 
     def get_next_token_distribution(
         self,
@@ -89,6 +117,7 @@ class FudgeInference:
             lambda_weight: Weight for combining base and FUDGE distributions
         """
         input_ids = self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
+        print(f"input_ids shape: {input_ids.shape}")  # Should be [1, seq_len]
         generated_tokens = input_ids.clone()
 
         for _ in range(max_length):
@@ -138,6 +167,8 @@ class FudgeInference:
 
             # Sample next token
             next_token = torch.multinomial(combined_distribution[0], num_samples=1)
+            print(f"next_token shape: {next_token.shape}")  # What shape is this?
+            print(f"generated_tokens shape: {generated_tokens.shape}")
             generated_tokens = torch.cat([generated_tokens, next_token], dim=-1)
 
             if next_token.item() == self.tokenizer.eos_token_id:
