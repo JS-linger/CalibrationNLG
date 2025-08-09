@@ -6,8 +6,8 @@ import importlib
 import preprocessing.pre_process_text
 importlib.reload(preprocessing.pre_process_text)
 
-import models.fudge.train_fudge_bert
-importlib.reload(models.fudge.fudge_train_autoregressive)
+import models.fudge.train_fudge_autoregressive
+importlib.reload(models.fudge.train_fudge_autoregressive)
 
 if __name__ == "__main__":
     import torch
@@ -41,7 +41,7 @@ if __name__ == "__main__":
         num_labels=num_labels,
         epochs=3,
         seed=42,
-        model_name='Qwen/Qwen1.5-0.5B'
+        model_name='Qwen/Qwen2.5-0.5B'
     )
 
 

@@ -26,10 +26,16 @@ class FudgeInference:
             weights_only=True  # Add this to match training save
         )
         
-        # Initialize FUDGE model first
+        # Initialize FUDGE model (use saved LoRA config if present)
+        lora_cfg = checkpoint.get('lora_config', {"enabled": False})
         self.fudge_model = AutoregressiveFudgeClassifier(
             model_name=checkpoint['base_model_name'],
-            num_labels=checkpoint['num_labels']
+            num_labels=checkpoint['num_labels'],
+            lora_enabled=bool(lora_cfg.get('enabled', False)),
+            lora_r=int(lora_cfg.get('r', 8)),
+            lora_alpha=int(lora_cfg.get('alpha', 32)),
+            lora_dropout=float(lora_cfg.get('dropout', 0.05)),
+            lora_target_modules=lora_cfg.get('target_modules')
         ).to(device)
         
         # Load the saved weights

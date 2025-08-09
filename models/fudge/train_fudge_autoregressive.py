@@ -13,14 +13,30 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import numpy as np
 
 from datasets import Dataset, DatasetDict
+from typing import Sequence
+
+# Optional LoRA via PEFT
+try:
+    from peft import LoraConfig, get_peft_model
+    _PEFT_AVAILABLE = True
+except Exception:
+    LoraConfig = None  # type: ignore
+    get_peft_model = None  # type: ignore
+    _PEFT_AVAILABLE = False
 
 class AutoregressiveFudgeClassifier(nn.Module):
     def __init__(
         self, 
-        model_name: str = 'Qwen/Qwen1.5-0.5B',
+        model_name: str = 'Qwen/Qwen2.5-0.5B',
         num_labels: int = 2,
         dropout: float = 0.1,
-        num_layers_to_train: int = 2
+        num_layers_to_train: int = 2,
+        # LoRA controls
+        lora_enabled: bool = False,
+        lora_r: int = 8,
+        lora_alpha: int = 32,
+        lora_dropout: float = 0.05,
+        lora_target_modules: Sequence[str] | None = None
     ) -> None:
         super().__init__()
         # Load the base autoregressive model
@@ -30,14 +46,43 @@ class AutoregressiveFudgeClassifier(nn.Module):
             trust_remote_code=True
         ).base_model  # Get the base model without LM head
 
-        # Freeze all parameters first
-        for param in self.base_model.parameters():
-            param.requires_grad = False
-            
-        # Unfreeze last n transformer layers
-        for layer in self.base_model.layers[-num_layers_to_train:]:
-            for param in layer.parameters():
-                param.requires_grad = True
+        # Set defaults for LoRA target modules (Qwen2-like)
+        if lora_target_modules is None:
+            lora_target_modules = (
+                "q_proj","k_proj","v_proj","o_proj","up_proj","down_proj","gate_proj"
+            )
+
+        if lora_enabled:
+            if not _PEFT_AVAILABLE:
+                raise ImportError("peft is required for LoRA. Install with: pip install peft")
+            # Train only adapters
+            for param in self.base_model.parameters():
+                param.requires_grad = False
+            peft_cfg = LoraConfig(
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                bias="none",
+                target_modules=list(lora_target_modules),
+                task_type="CAUSAL_LM",
+            )
+            self.base_model = get_peft_model(self.base_model, peft_cfg)
+            self._lora_config_dict = {
+                "enabled": True,
+                "r": lora_r,
+                "alpha": lora_alpha,
+                "dropout": lora_dropout,
+                "target_modules": list(lora_target_modules),
+            }
+        else:
+            # Freeze all parameters first
+            for param in self.base_model.parameters():
+                param.requires_grad = False
+            # Unfreeze last n transformer layers
+            for layer in self.base_model.layers[-num_layers_to_train:]:
+                for param in layer.parameters():
+                    param.requires_grad = True
+            self._lora_config_dict = {"enabled": False}
         
         hidden_size = self.base_model.config.hidden_size
         
@@ -54,7 +99,8 @@ class AutoregressiveFudgeClassifier(nn.Module):
         self, 
         input_ids: torch.Tensor, 
         attention_mask: torch.Tensor | None = None, 
-        labels: torch.Tensor | None = None
+        labels: torch.Tensor | None = None,
+        **_: dict
     ) -> dict[str, torch.Tensor]:
         # Get model outputs
         outputs = self.base_model(
@@ -91,7 +137,13 @@ def train_fudge_model(
     num_labels: int | None = None,
     epochs: int = 10,
     seed: int = 42,
-    model_name: str = 'Qwen/Qwen1.5-0.5B'
+    model_name: str = 'Qwen/Qwen2.5-0.5B',
+    # LoRA controls
+    lora_enabled: bool = False,
+    lora_r: int = 8,
+    lora_alpha: int = 32,
+    lora_dropout: float = 0.05,
+    lora_target_modules: Sequence[str] | None = None
 ) -> tuple[AutoregressiveFudgeClassifier, PreTrainedTokenizer]:
     """
     Train the FUDGE model using an autoregressive model as the base.
@@ -123,7 +175,12 @@ def train_fudge_model(
     # Initialize model
     model = AutoregressiveFudgeClassifier(
         model_name=model_name,
-        num_labels=num_labels
+        num_labels=num_labels,
+        lora_enabled=lora_enabled,
+        lora_r=lora_r,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        lora_target_modules=lora_target_modules
     )
     model.to('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -189,10 +246,10 @@ def train_fudge_model(
     # Training arguments
     training_args = TrainingArguments(
         output_dir=model_output_dir,
-        evaluation_strategy="steps",     # Evaluate du ring training
-        eval_steps=0.1,                  # Evaluate every 100 steps
-        save_strategy="steps",           # Save based on evaluation
-        save_steps=0.1,                  # Save every 100 steps
+        evaluation_strategy="steps",
+        eval_steps=100,
+        save_strategy="steps",
+        save_steps=200,
         learning_rate=1e-5,
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
@@ -200,15 +257,15 @@ def train_fudge_model(
         num_train_epochs=epochs,
         weight_decay=0.01,
         logging_dir='./logs',
-        logging_steps=0.1,
-        fp16=True,
+        logging_steps=50,
+        fp16=torch.cuda.is_available(),
         group_by_length=True,
         load_best_model_at_end=True,
-        save_total_limit=1,              # Keep only the best model
-        metric_for_best_model="eval_loss",  # Use validation loss for best model
-        greater_is_better=False,         # Lower loss is better
+        save_total_limit=1,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         warmup_ratio=0.1,
-        remove_unused_columns=True
+        remove_unused_columns=False
     )
 
     # Initialize trainer
@@ -236,7 +293,8 @@ def train_fudge_model(
         'state_dict': model.state_dict(),
         'base_model_name': model_name,
         'num_labels': num_labels,
-        'label_mapping': label_mapping
+        'label_mapping': label_mapping,
+        'lora_config': getattr(model, '_lora_config_dict', {"enabled": False})
     }, final_model_path)
     
     tokenizer.save_pretrained(model_output_dir)
