@@ -39,3 +39,4 @@ env/
 *.so
 *.dll
 *.exe
+.env

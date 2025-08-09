@@ -85,7 +85,7 @@ def run_inference_batch(
 
 if __name__ == "__main__":
     test_prompts = [
-        "write a concise book synopsis:"
+        "write a very concise book synopsis:"
     ]
 
     target_class = "horror"
