@@ -39,7 +39,7 @@ if __name__ == "__main__":
         label_column='labels',
         label_mapping=label_map,
         num_labels=num_labels,
-        epochs=3,
+        epochs=10,
         seed=42,
         model_name='Qwen/Qwen2.5-0.5B'
     )
